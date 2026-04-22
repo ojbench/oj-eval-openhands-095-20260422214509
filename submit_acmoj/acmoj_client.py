@@ -1,31 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ACMOJ API Client Command Line Tool - Git Submission Version v2.2
+ACMOJ API Client Command Line Tool - Git/File Submission Version v2.3
 
 Usage Examples:
 1. Submit Git URL:
    python3 acmoj_client.py --token ${ACMOJ_TOKEN} submit --problem-id ${ACMOJ_PROBLEM_ID} --git-url ${REPO_URL}
-   The returned result contains submission_id information, please save it for subsequent status queries
-   
-   URL format can be HTTPS or SSH:
-   - HTTPS: https://github.com/username/repository.git
-   - SSH: git@github.com:username/repository.git
 
-2. Query submission status:
+2. Submit single file content (e.g., src.hpp for header-only problems):
+   python3 acmoj_client.py --token ${ACMOJ_TOKEN} submit --problem-id ${ACMOJ_PROBLEM_ID} --file /path/to/src.hpp
+
+3. Query submission status:
    python3 acmoj_client.py --token ${ACMOJ_TOKEN} status --submission-id <your_submission_id>
-   Note: Evaluation takes time, it's recommended to wait 10 seconds before querying status
-   For example, if the returned result shows "status": "compiling" or "status": "pending", 
-   it means the evaluation is still in progress or queued, please check again later
 
-3. Abort submission:
+4. Abort submission:
    python3 acmoj_client.py --token ${ACMOJ_TOKEN} abort --submission-id <your_submission_id>
-   Abort the evaluation of the specified submission
 """
 
 import requests
 import json
-import time
 import argparse
 import os
 from typing import Dict, Any, Optional
@@ -38,14 +31,13 @@ class ACMOJClient:
         self.headers = {
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "ACMOJ-Python-Client/2.2"
+            "User-Agent": "ACMOJ-Python-Client/2.3"
         }
 
         self.submission_log_file = '/workspace/submission_ids.log'
-        
 
-    def _make_request(self, method: str, endpoint: str, data: Dict[str, Any] = None, 
-                     params: Dict[str, Any] = None) -> Optional[Dict]:
+    def _make_request(self, method: str, endpoint: str, data: Dict[str, Any] = None,
+                      params: Dict[str, Any] = None) -> Optional[Dict]:
         url = f"{self.api_base}{endpoint}"
         try:
             if method.upper() == "GET":
@@ -60,7 +52,7 @@ class ACMOJClient:
                 return {"status": "success", "message": "Operation successful"}
 
             response.raise_for_status()
-            
+
             if response.content:
                 return response.json()
             else:
@@ -79,20 +71,32 @@ class ACMOJClient:
                 "timestamp": timestamp,
                 "submission_id": submission_id
             }
-            
+
             with open(self.submission_log_file, 'a') as f:
                 f.write(json.dumps(log_entry) + '\n')
-            
+
             print(f"✅ Submission ID {submission_id} saved to {self.submission_log_file}")
         except Exception as e:
-            print(f"⚠️ Warning: Failed to save submission ID: {e}")
+            print(f"⚠️  Warning: Failed to save submission ID: {e}")
 
     def submit_git(self, problem_id: int, git_url: str) -> Optional[Dict]:
         data = {"language": "git", "code": git_url}
         result = self._make_request("POST", f"/problem/{problem_id}/submit", data=data)
         if result and 'id' in result:
             self._save_submission_id(result['id'])
+        return result
 
+    def submit_file(self, problem_id: int, file_path: str) -> Optional[Dict]:
+        try:
+            with open(file_path, 'r') as f:
+                content = f.read()
+        except Exception as e:
+            print(f"Failed to read file {file_path}: {e}")
+            return None
+        data = {"language": "cpp", "code": content}
+        result = self._make_request("POST", f"/problem/{problem_id}/submit", data=data)
+        if result and 'id' in result:
+            self._save_submission_id(result['id'])
         return result
 
     def get_submission_detail(self, submission_id: int) -> Optional[Dict]:
@@ -104,15 +108,16 @@ class ACMOJClient:
 
 def main():
     parser = argparse.ArgumentParser(description="ACMOJ API Command Line Client")
-    parser.add_argument("--token", help="ACMOJ Access Token", 
+    parser.add_argument("--token", help="ACMOJ Access Token",
                        default=os.environ.get("ACMOJ_TOKEN"))
-    
+
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # Git submission sub-command
-    submit_parser = subparsers.add_parser("submit", help="Submit Git repository")
+    # Submission sub-command (supports git-url or file)
+    submit_parser = subparsers.add_parser("submit", help="Submit Git repository or single file content")
     submit_parser.add_argument("--problem-id", type=int, required=True, help="Problem ID")
-    submit_parser.add_argument("--git-url", type=str, required=True, help="Git repository URL")
+    submit_parser.add_argument("--git-url", type=str, required=False, help="Git repository URL")
+    submit_parser.add_argument("--file", type=str, required=False, help="Path to source file to upload (contents will be submitted)")
 
     # Sub-command for checking submission status
     status_parser = subparsers.add_parser("status", help="Check submission status")
@@ -131,7 +136,16 @@ def main():
     client = ACMOJClient(args.token)
 
     if args.command == "submit":
-        result = client.submit_git(args.problem_id, args.git_url)
+        if args.file and args.git_url:
+            print("Error: Please specify either --git-url or --file, not both.")
+            return
+        if args.file:
+            result = client.submit_file(args.problem_id, args.file)
+        elif args.git_url:
+            result = client.submit_git(args.problem_id, args.git_url)
+        else:
+            print("Error: You must provide --git-url or --file for submission.")
+            return
     elif args.command == "status":
         result = client.get_submission_detail(args.submission_id)
     elif args.command == "abort":
