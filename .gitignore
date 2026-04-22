@@ -1,0 +1,16 @@
+# Binaries and local builds
+local_test
+*.o
+*.out
+*.exe
+
+# Core dumps
+core
+core.*
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Misc
+.DS_Store
